@@ -1,8 +1,8 @@
 # Feature builds and publication
 
 Use a separate `codex/` branch for each feature. Base each branch on the last accepted build, make the change,
-run the repository checks, then create a signed APK and publish a phone-test candidate. Keep the PR open until
-the owner has checked the APK on the paired phone. A successful candidate can then be merged and promoted.
+run the repository checks, then create a signed APK and publish a phone-test candidate directly through GitHub
+Releases. The owner explicitly does not want pull requests. A candidate can be promoted after phone testing.
 
 ## Build
 
@@ -31,7 +31,7 @@ APKs are Release assets, not Git blobs. The local build folder keeps the APK, ch
 its markdown/checksum files are committed and its APK/logs are git-ignored.
 
 After checks and APK verification, commit with the configured fork owner's Git identity and a signed-off
-Conventional Commit. Push the feature branch, open a PR in this fork, then publish the tested source commit:
+Conventional Commit. Push the feature branch, then publish the tested source commit directly without a pull request:
 
 ```powershell
 python scripts/publish-release.py --check

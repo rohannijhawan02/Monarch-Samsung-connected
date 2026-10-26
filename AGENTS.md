@@ -8,6 +8,7 @@ then activity logging, advanced strength tracking, run GPS visualizations, and S
 Do not bundle later features into the first APK. Each build gets a folder under `builds/` with change notes,
 validation and a release link; APK binaries go to GitHub Releases and remain git-ignored locally.
 Use `codex/` branches and the configured fork owner's Git identity, never the upstream maintainer's identity.
+The owner explicitly does not want pull requests. Do not create any. Publish APKs directly through GitHub Releases.
 Publish phone-test candidates from a feature branch; main is updated after the owner has tested that candidate.
 The `halo` and research directories mentioned below are not available in this workspace. The pinned upstream
 snapshot in `docs/upstream-snapshot.json` is the comparison reference until those sources are provided.
