@@ -7,6 +7,14 @@ import type { ActivityCostResult } from "@/core/algorithms/activityCost";
 import { minuteHr } from "@/core/engine/context";
 
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+/** Clone the test store without losing Samples' prototype or its Maps/Sets. */
+function cloneState<T>(v: T): T {
+  if (v === null || typeof v !== "object") return v;
+  if (v instanceof Map) return new Map([...v].map(([k, x]) => [k, cloneState(x)])) as T;
+  if (v instanceof Set) return new Set(v) as T;
+  if (Array.isArray(v)) return v.map(cloneState) as T;
+  return Object.assign(Object.create(Object.getPrototypeOf(v)), Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cloneState(x)]))) as T;
+}
 const key2 = (a: string, b: string) => `${a}\u0000${b}`;
 const inRange = (day: string, r?: DayRange) => !r || (day >= r.from && day <= r.to);
 
@@ -89,6 +97,12 @@ class Samples {
 }
 
 export class MemoryStore implements Store {
+  async atomicImport<T>(task: (store: Store) => Promise<T>): Promise<T> {
+    const staged = cloneState(this);
+    const result = await task(staged);
+    Object.assign(this, staged);
+    return result;
+  }
   private profile: Profile | null = null;
   private sync: SyncState = { lastSyncTs: null, firstDay: null, lastError: null };
   private metrics = new Map<string, Metrics>();

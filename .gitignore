@@ -2,6 +2,13 @@
 
 # dependencies
 node_modules/
+.build-tools/
+.release-signing/
+.research/
+builds/**/*.apk
+builds/**/logs/
+.pulse-upstream/
+artifacts/
 
 # Expo
 .expo/

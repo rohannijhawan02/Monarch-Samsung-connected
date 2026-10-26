@@ -126,6 +126,66 @@ describe("windowPlan", () => {
   });
 });
 
+describe("today's data survives refreshes", () => {
+  it("keeps previously read vitals when today's refresh only contains steps", async () => {
+    const store = await staleStore();
+    storage.set(IMPORT_STATE_KEY, JSON.stringify({ version: IMPORT_VERSION }));
+    await store.upsertMetrics([{ ...emptyMetrics("2026-10-07"), hrvMs: 54, rhrBpm: 58, respBpm: 14, nightlyTempC: 33.8, steps: 120 }]);
+    await syncHealthConnect(store, { timeZone: TZ, now: NOW, historyDays: 5, full: true });
+    expect((await store.allMetrics()).find((m) => m.day === "2026-10-07")).toMatchObject({ hrvMs: 54, rhrBpm: 58, respBpm: 14, nightlyTempC: 33.8, steps: 600 });
+  });
+
+  it("rolls back a re-import if a per-day sensor read fails after the old rows were cleared", async () => {
+    const store = await staleStore();
+    const before = await store.allMetrics();
+    const samples = await store.readSteps(0, Number.MAX_SAFE_INTEGER);
+    const read = hc.readAll.getMockImplementation()!;
+    hc.readAll.mockImplementation((async (...args: Parameters<typeof readAll>) => {
+      if (args[0] === "HeartRate") throw new Error("Health Connect temporarily unavailable");
+      return read(...args);
+    }) as typeof readAll);
+    await expect(syncHealthConnect(store, { timeZone: TZ, now: NOW, historyDays: 5 })).rejects.toThrow("temporarily unavailable");
+    expect(await store.allMetrics()).toEqual(before);
+    expect(await store.readSteps(0, Number.MAX_SAFE_INTEGER)).toEqual(samples);
+    expect((await store.getSyncState()).lastSyncTs).toBe(sec("2026-10-07T06:00:00Z"));
+    expect(storage.get("pulse.hc.changesToken")).toBe("old");
+  });
+
+  it("does not advance source metadata if the database cannot commit", async () => {
+    const store = await staleStore();
+    const atomic = store.atomicImport.bind(store);
+    vi.spyOn(store, "atomicImport").mockImplementation((task) => atomic(async (transaction) => {
+      await task(transaction);
+      throw new Error("disk full at commit");
+    }));
+    const previous = storage.get(IMPORT_STATE_KEY);
+    await expect(syncHealthConnect(store, { timeZone: TZ, now: NOW, historyDays: 5 })).rejects.toThrow("disk full");
+    expect(storage.get(IMPORT_STATE_KEY)).toBe(previous);
+    expect(storage.get("pulse.hc.changesToken")).toBe("old");
+    expect((await store.getSyncState()).lastSyncTs).toBe(sec("2026-10-07T06:00:00Z"));
+  });
+
+  it("keeps stored scores until the scoring pipeline replaces them", async () => {
+    const store = await staleStore();
+    const score = { day: "2026-10-07", scoringVersion: 19, strain: null, activities: null, sessionRhrBpm: null, recovery: null,
+      sleep: null, training_load: null, strain_target: null, sleep_planner: null, energy_bank: null, stress: null,
+      health_monitor: null, healthspan: null, fitness: null, journal_impact: null };
+    await store.putScores(score);
+    await syncHealthConnect(store, { timeZone: TZ, now: NOW, historyDays: 5 });
+    expect(await store.getScores(score.day)).toEqual(score);
+    expect(await store.takeIntradayDirty()).toContain(score.day);
+  });
+
+  it("does not clear a replacement window after a previously granted permission was revoked", async () => {
+    const store = await staleStore();
+    storage.set("pulse.hc.readTypes", JSON.stringify(["HeartRate", "HeartRateVariabilityRmssd", "Steps"]));
+    const previous = await store.allMetrics();
+    await expect(syncHealthConnect(store, { timeZone: TZ, now: NOW, historyDays: 5 })).rejects.toThrow("permissions_changed");
+    expect(await store.allMetrics()).toEqual(previous);
+  });
+
+});
+
 describe("syncHealthConnect re-import", () => {
   it("keeps a minimum-duration workout when another app supplies a shorter titled copy", async () => {
     const store = await staleStore();

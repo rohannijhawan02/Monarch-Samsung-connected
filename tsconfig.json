@@ -19,6 +19,6 @@
     "nativewind-env.d.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules", ".pulse-upstream", ".research", ".build-tools", "artifacts"
   ]
 }

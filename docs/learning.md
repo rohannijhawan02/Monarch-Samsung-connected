@@ -1,5 +1,18 @@
 # Learning notes
 
+## Atomic Health Connect imports in the Monarch fork
+
+The SDK 57 SQLite documentation confirms that `withExclusiveTransactionAsync` uses its transaction handle to
+isolate a complete import. The transaction-bound Store skips nested BEGIN/COMMIT calls. Keeping imported rows and
+last-good scores until replacement prevents a failed range read from leaving an empty dashboard. Change tokens
+live in AsyncStorage and therefore advance only after the SQLite transaction commits.
+
+## Reproducible Monarch APKs
+
+The fork keeps Expo Continuous Native Generation: its package/version stay in app.json and its release signing
+configuration lives in a config plugin. A private, git-ignored key signs every local release. A generated Android
+tree is never edited manually. The separate package lets the phone-test candidate coexist with upstream Pulse.
+
 A running notebook for learning React Native through this project. One short section per choice: what it is, and why it was chosen here. Add a section whenever an Expo or React Native choice is made.
 
 ## Expo instead of bare React Native

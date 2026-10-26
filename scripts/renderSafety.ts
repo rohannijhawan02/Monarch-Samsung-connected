@@ -40,7 +40,7 @@ const functionName = (n: ts.FunctionDeclaration | ts.ArrowFunction | ts.Function
   ts.isFunctionDeclaration(n) ? (n.name?.text ?? "") : (n.parent as ts.VariableDeclaration).name.getText();
 
 const findingAt = ({ root }: Loaded, sf: ts.SourceFile, n: ts.Node, message: string): Finding => ({
-  file: path.relative(root, sf.fileName),
+  file: path.relative(root, sf.fileName).split(path.sep).join("/"),
   line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1,
   message,
 });

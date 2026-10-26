@@ -2,7 +2,7 @@ const { defineConfig } = require("eslint/config");
 const i18next = require("eslint-plugin-i18next");
 const expoConfig = require("eslint-config-expo/flat");
 
-module.exports = defineConfig([expoConfig, { ignores: ["dist/*", ".expo/*", ".claude/*"] },
+module.exports = defineConfig([expoConfig, { ignores: ["dist/*", ".expo/*", ".claude/*", ".pulse-upstream/**", ".research/**", ".build-tools/**", ".release-signing/**", "builds/**/logs/**", "artifacts/**"] },
   {
     // Copy goes through i18n keys (docs/i18n.md). Units and glossary names may stay literal.
     files: ["app/**/*.{ts,tsx}", "src/screens/**/*.{ts,tsx}", "src/ui/**/*.{ts,tsx}"],

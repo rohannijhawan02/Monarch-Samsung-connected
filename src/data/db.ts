@@ -216,7 +216,20 @@ const LOGGED_INSERT = `insert or replace into logged_entries (${LOGGED_COLUMNS})
 const loggedParams = (r: LoggedEntryRow, source: EntrySource): Param[] => [r.id, r.type, r.ts, r.day, JSON.stringify(r.data), r.createdAt, source];
 
 class SqliteStore implements Store {
-  constructor(private db: SQLiteDatabase) {}
+  constructor(private db: SQLiteDatabase, private inImport = false) {}
+
+  async atomicImport<T>(task: (store: Store) => Promise<T>): Promise<T> {
+    if (this.inImport) return task(this);
+    return this.queued(async () => {
+      let result!: T;
+      // One dedicated transaction per import: UI readers keep seeing the committed snapshot; every write rolls back
+      // if Health Connect fails halfway through the per-day reads. The transaction-bound store never nests BEGIN.
+      await this.db.withExclusiveTransactionAsync(async (db) => {
+        result = await task(new SqliteStore(db, true));
+      });
+      return result;
+    });
+  }
 
   /** Swaps in a freshly opened connection (see `healing` below); the write queue carries on. */
   replaceDb(db: SQLiteDatabase): void {
@@ -237,6 +250,7 @@ class SqliteStore implements Store {
    * "NativeDatabase.prepareAsync has been rejected (NullPointerException)" under that churn.
    */
   private tx<T>(task: (db: SQLiteDatabase) => Promise<T>): Promise<T> {
+    if (this.inImport) return task(this.db);
     return this.queued(async () => {
       await this.db.execAsync("begin immediate");
       try {

@@ -1,3 +1,6 @@
+**Monarch fork:** Galaxy Watch 8 development based on [Pulse Mobile](https://github.com/adityaongit/pulse-mobile).
+We are releasing one feature at a time. [Build history](builds/README.md) · [Roadmap and PR review](docs/monarch/roadmap.md).
+
 <div align="center">
 
 <img src="assets/brand/logo-round.svg" alt="" width="88" height="88">

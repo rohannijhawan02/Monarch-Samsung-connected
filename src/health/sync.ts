@@ -33,6 +33,7 @@ import { resolveMaxHr } from "@/pipeline/index";
 import { forgetChanges, readImportState, TOKEN_KEY, TYPES_KEY, writeImportState } from "@/health/importState";
 import { originBreakdown } from "@/health/origins";
 import { uniqueExercises } from "./exerciseDedup";
+import { mergeMetricRead } from "./metricMerge";
 
 export { forgetChanges };
 
@@ -53,8 +54,9 @@ export { forgetChanges };
  * and a sync that finds deletions replaces the window it re-reads (see replaceWindow). 7: the source policy is gone; every
  * app's records are kept, the largest source per day for measured totals. 8: near-identical workouts from different
  * apps are imported once, retaining distinct sports, partial overlaps and records with no source.
+ * 9: imports commit atomically, preserve scores until rescoring, and partial metric reads retain known fields.
  */
-export const IMPORT_VERSION = 8;
+export const IMPORT_VERSION = 9;
 
 /**
  * How far before the window's first local midnight the reads start. Health Connect returns a record only to a read whose
@@ -204,6 +206,19 @@ const WINDOW_TYPES = READ_TYPES.filter((t) => t !== "HeartRate" && t !== "Steps"
 export const READ_CONCURRENCY = 4;
 
 export async function syncHealthConnect(store: Store, opts: SyncOptions): Promise<SyncResult> {
+  try {
+    const afterCommit: (() => Promise<void>)[] = [];
+    const result = await store.atomicImport((transaction) => importHealthConnect(transaction, opts, afterCommit));
+    for (const finish of afterCommit) await finish();
+    return result;
+  } catch (error) {
+    // Tokens and importer versions advance only after SQLite commits. A retry can still see every source change.
+    await store.setSyncState({ lastError: error instanceof Error ? error.message : String(error) }).catch(() => {});
+    throw error;
+  }
+}
+
+async function importHealthConnect(store: Store, opts: SyncOptions, afterCommit: (() => Promise<void>)[]): Promise<SyncResult> {
   const tz = opts.timeZone;
   const now = opts.now ?? new Date();
   const nowTs = Math.floor(now.getTime() / 1000);
@@ -251,7 +266,6 @@ export async function syncHealthConnect(store: Store, opts: SyncOptions): Promis
     const why = fullReason({ requested: !!opts.full, lastSyncTs: state.lastSyncTs, hasNights, hasToken: !!token, newlyGranted: newlyGranted.length, imported: await readImportState() });
     if (why) counts[`why:${why}`] = 1;
     if (plan.reimport) {
-      await forgetChanges();
       counts.reimport = 1;
     }
 
@@ -272,7 +286,7 @@ export async function syncHealthConnect(store: Store, opts: SyncOptions): Promis
       // bring back exactly what is stored, so it is skipped (most background runs).
       if (changed !== "expired" && changed.earliest === null && !changed.deleted && localDay(state.lastSyncTs, tz) === today) {
         await store.setSyncState({ lastSyncTs: nowTs, lastError: null });
-        await AsyncStorage.setItem(TOKEN_KEY, changed.token).catch(() => {});
+        afterCommit.push(() => AsyncStorage.setItem(TOKEN_KEY, changed.token).catch(() => {}));
         progress("done", 1, 1);
         return { from: today, to: today, counts: { unchanged: 1 }, warnings, unchanged: true };
       }
@@ -359,7 +373,10 @@ export async function syncHealthConnect(store: Store, opts: SyncOptions): Promis
     // A re-import replaces: what earlier imports wrote for these days goes before the new rows are written, so a day the
     // new mapping leaves without steps, a workout or a derived minute doesn't keep the old one. The first day
     // goes too: the reads' lead (READ_LEAD_S) brings back its night, which began before the window.
-    if (plan.reimport) await store.clearImported({ from: fromDay, to: today }, windowStart, nowTs + 1);
+    if ((plan.reimport || replaceWindow) && [...knownTypes].some((type) => !granted.has(type as ReadType))) {
+      throw new Error("health_connect_permissions_changed: restore the previously granted permissions before replacing imported data");
+    }
+    if (plan.reimport) await store.clearImported({ from: fromDay, to: today }, windowStart, nowTs + 1, { keepScores: true });
     // A deletion only replaces the window's imported rows: the scores stay, and stage 2 redoes the days whose inputs changed.
     else if (replaceWindow) await store.clearImported({ from: fromDay, to: today }, windowStart, nowTs + 1, { keepScores: true });
 
@@ -367,7 +384,7 @@ export async function syncHealthConnect(store: Store, opts: SyncOptions): Promis
     // running over midnight carries its later samples into the next day (`spill`); the first day reads the lead for
     // records begun before the window.
     const stepsByDay = new Map<string, number>();
-    const dirty: string[] = [];
+    const dirty: string[] = plan.reimport || replaceWindow ? Array.from({ length: dayCount }, (_, i) => addDays(fromDay, i)) : [];
     let hrCount = 0;
     let stepCount = 0;
     const spill: { HeartRate: HeartRateRecords; Steps: StepsRecords } = { HeartRate: [], Steps: [] };
@@ -453,6 +470,9 @@ export async function syncHealthConnect(store: Store, opts: SyncOptions): Promis
     }
     counts.hr = hrCount;
     counts.steps = stepCount;
+    if ((plan.reimport || replaceWindow) && state.lastSyncTs !== null && skipped.size) {
+      throw new Error("health_connect_incomplete_read: replacement deferred until every record can be read");
+    }
 
     // 3. Map and write the rest: the window's days only (the lead day's rows would be built from part of its records).
     progress("write", done, total);
@@ -492,7 +512,11 @@ export async function syncHealthConnect(store: Store, opts: SyncOptions): Promis
     // day's calories with it); a type that was not granted, or had a record it could not read, keeps what is stored.
     const replaced = Object.entries(SOURCE_DAILY_KEYS).filter(([, type]) => granted.has(type) && !skipped.has(type)).map(([key]) => key);
     await store.replaceDailyValues({ from: fromDay, to: today }, replaced, dailyValues);
-    if (metrics.length) await store.upsertMetrics(metrics);
+    // A missing/revoked/skipped type is unknown, not a new null measurement. Previously a steps-only refresh could
+    // overwrite today's complete row and make Recovery/vitals disappear. Explicit source deletions/reimports still
+    // clear rows above; non-null corrections (including zero) always win.
+    const previousMetrics = new Map((await store.allMetrics()).map((m) => [m.day, m]));
+    if (metrics.length) await store.upsertMetrics(metrics.map((m) => mergeMetricRead(m, previousMetrics.get(m.day))));
     await store.replaceExternalEntries({ from: fromDay, to: today }, external);
     if (dirty.length) await store.markIntradayDirty(dirty);
     counts.sessions = sessions.length;
@@ -508,12 +532,13 @@ export async function syncHealthConnect(store: Store, opts: SyncOptions): Promis
 
     const firstDay = state.firstDay && state.firstDay < fromDay ? state.firstDay : fromDay;
     await store.setSyncState({ lastSyncTs: nowTs, firstDay, lastError: null });
-    if (nextToken) await AsyncStorage.multiSet([[TOKEN_KEY, nextToken], [TYPES_KEY, JSON.stringify(grantedTypes)]]).catch(() => {});
-    // No token this time (the feed would not give one): the old one stays, it only reports more. Forgetting it would turn
-    // the next sync into a read of the whole window.
-    else if (!token) await forgetChanges();
-    // Recorded last: a sync that fails part-way re-imports again next time.
-    await writeImportState({ version: IMPORT_VERSION });
+    afterCommit.push(async () => {
+      if (nextToken) await AsyncStorage.multiSet([[TOKEN_KEY, nextToken], [TYPES_KEY, JSON.stringify(grantedTypes)]]).catch(() => {});
+      // No token this time: the old one stays, it only reports more. Forgetting it would cause a full re-read.
+      else if (!token) await AsyncStorage.multiRemove([TOKEN_KEY, TYPES_KEY]).catch(() => {});
+      // Recorded only after the data committed; a failed transaction retains the last successful mapping version.
+      await writeImportState({ version: IMPORT_VERSION });
+    });
     progress("done", done, total);
     return { from: fromDay, to: today, counts, warnings };
   } catch (e) {

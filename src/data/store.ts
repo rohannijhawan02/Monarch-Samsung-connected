@@ -9,6 +9,8 @@ import type { DetectedActivity } from "@/core/algorithms/autoWorkout";
 export type DayRange = { from: string; to: string };
 
 export interface Store {
+  /** Commit a complete import together. A failed read/write leaves the last successful snapshot intact. */
+  atomicImport<T>(task: (store: Store) => Promise<T>): Promise<T>;
   // Profile and sync
   getProfile(): Promise<Profile | null>;
   setProfile(p: Profile): Promise<void>;

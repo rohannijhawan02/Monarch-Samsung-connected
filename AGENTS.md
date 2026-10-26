@@ -1,5 +1,18 @@
 # AGENTS.md
 
+## Monarch fork instructions
+
+This fork lives at `rohannijhawan02/Monarch-Samsung-connected`. Preserve upstream history and license attribution.
+The owner requested one feature per build: first the disappearing-today-data fix and an APK for phone testing,
+then activity logging, advanced strength tracking, run GPS visualizations, and Samsung watch integration.
+Do not bundle later features into the first APK. Each build gets a folder under `builds/` with change notes,
+validation and a release link; APK binaries go to GitHub Releases and remain git-ignored locally.
+Use `codex/` branches and the configured fork owner's Git identity, never the upstream maintainer's identity.
+Publish phone-test candidates from a feature branch; main is updated after the owner has tested that candidate.
+The `halo` and research directories mentioned below are not available in this workspace. The pinned upstream
+snapshot in `docs/upstream-snapshot.json` is the comparison reference until those sources are provided.
+These fork-specific instructions take precedence over the upstream Git/release instructions below.
+
 Guide for coding agents (and humans) working on Pulse Mobile: an Android app (Expo) where every byte lives on the phone. It reads the owner's Fitbit data from **Health Connect**, keeps it in SQLite, and turns it into recovery, strain, sleep, Pulse Age, stress, Energy Bank and journal insights. There is no server, no account and no Google sign-in: one install is one person.
 
 The engine (Health Connect source, storage, scoring, view models) comes from **halo**, a fork of the same pulse app, at `~/personal/halo`. halo is the reference for engine code: read it beside every change to `src/health`, `src/data`, `src/core`, `src/pipeline` and `src/queries`, and do things the way it does. The UI is Pulse's own and keeps the look of the pulse PWA. The move and its phases are in `docs/rewrite-plan.md`.
